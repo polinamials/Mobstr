@@ -7,8 +7,6 @@
 
 #include "rtp_packetizer.hpp"
 
-#define DEFAULT_MTU 1400
-
 enum H264_NAL_TYPES {
     NON_IDR = 1,
     IDR = 5,
@@ -32,10 +30,11 @@ struct NaluInfo
 class H264Packetizer : public RtpPacketizer
 {
 public:
-    H264Packetizer();
+    H264Packetizer(size_t packetSize);
     std::vector<RtpPacket> processFrame(const uint8_t* data, size_t size, uint32_t flags, uint32_t timestamp) override;
 
 private:
+    size_t m_packetSize;
     std::vector<RtpPacket> m_packets;
     std::vector<NaluInfo> m_nalus;
 
@@ -47,10 +46,7 @@ private:
     std::vector<RtpPacket> getSingleNalRtpPackets(const uint8_t* data, const size_t size, const uint32_t timestamp, const size_t packetSize, const std::vector<NaluInfo>& nalus);
     std::vector<RtpPacket> getAggregateRtpPackets(const uint8_t* data, const size_t size, const uint32_t timestamp, const size_t packetSize, const std::vector<NaluInfo>& nalus);
 
-
     std::vector<NaluInfo> getNalus(const uint8_t *data, size_t size, uint32_t flags);
-
-
 };
 
 

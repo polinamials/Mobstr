@@ -31,6 +31,14 @@ android {
                 "proguard-rules.pro"
             )
         }
+        create("profiling") {
+            isDebuggable = false
+            isProfileable = true
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

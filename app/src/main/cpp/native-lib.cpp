@@ -6,16 +6,14 @@
 StreamController* g_streamController = nullptr;
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_example_mobstr_MainActivity_initCameraStream(JNIEnv* env, jobject thiz, jstring ip, jint port) {
+Java_com_example_mobstr_MainActivity_initCameraStream(JNIEnv* env, jobject thiz, jstring ip, jint port, jint mtu) {
 
     const char* ipStr = env->GetStringUTFChars(ip, nullptr);
-
-    // Initialize stream controller
-    g_streamController = new StreamController(ipStr, static_cast<uint16_t>(port));
+    g_streamController = new StreamController(ipStr, static_cast<uint16_t>(port), static_cast<size_t>(mtu));
     env->ReleaseStringUTFChars(ip, ipStr);
 
     // TODO: unhardcode resolution
-    ANativeWindow* surfaceWindow = g_streamController->initializeEncoder(640, 480);
+    ANativeWindow* surfaceWindow = g_streamController->initializeEncoder(4096, 3072);
 
     // Return java surface
     jobject javaSurface = ANativeWindow_toSurface(env, surfaceWindow);

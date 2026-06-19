@@ -4,13 +4,16 @@
 #include <string>
 #include <atomic>
 #include <thread>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
 #include <media/NdkMediaCodec.h>
 #include "socket.hpp"
 #include "packetizers/rtp_packetizer.hpp"
 
 class StreamController {
 public:
-    StreamController(const std::string& ip, uint16_t port);
+    StreamController(const std::string& ip, uint16_t port, size_t packetSize);
     ~StreamController();
 
     ANativeWindow* initializeEncoder(int32_t width, int32_t height);

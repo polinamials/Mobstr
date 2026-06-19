@@ -2,16 +2,21 @@ package com.example.mobstr
 
 import android.Manifest
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
+import android.util.Log
 import android.view.Surface
 import android.widget.Button
+import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.widget.doAfterTextChanged
+import androidx.core.content.edit
 
 class MainActivity : AppCompatActivity() {
 
@@ -19,8 +24,13 @@ class MainActivity : AppCompatActivity() {
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
     private var nativeSurface: Surface? = null
+    private lateinit var startStreamBtn: Button
+    private lateinit var recvIpTextInput: EditText
+    private lateinit var recvPortNumInput: EditText
+    private lateinit var mtuNumInput: EditText
+    private lateinit var preferences: SharedPreferences
 
-    private external fun initCameraStream(ip: String, port: Int): Surface
+    external fun initCameraStream(ip: String, port: Int, mtu: Int): Surface
     private external fun startCameraStream()
     private external fun stopCameraStream()
 
@@ -34,7 +44,21 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        val startStreamBtn = findViewById<Button>(R.id.startStreamBtn)
+        startStreamBtn = findViewById<Button>(R.id.startStreamBtn)
+        recvIpTextInput = findViewById<EditText>(R.id.recvIpTextInput)
+        recvPortNumInput = findViewById<EditText>(R.id.recvPortNumInput)
+        mtuNumInput = findViewById<EditText>(R.id.mtuNumInput)
+
+        preferences = getSharedPreferences("MobstrPrefs", 0)
+
+        val savedIp = preferences.getString("ip", "")
+        val savedPort = preferences.getInt("port", 5004)
+        val savedMtu = preferences.getInt("mtu", 1500)
+
+        recvIpTextInput.setText(savedIp)
+        recvPortNumInput.setText(savedPort.toString())
+        mtuNumInput.setText(savedMtu.toString())
+
         startStreamBtn.setOnClickListener {
             if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(arrayOf(Manifest.permission.CAMERA), 101)
@@ -46,6 +70,26 @@ class MainActivity : AppCompatActivity() {
                     stopCameraPipeline()
                     startStreamBtn.text = "Start Streaming"
                 }
+            }
+        }
+
+        recvIpTextInput.doAfterTextChanged { text ->
+            preferences.edit {
+                putString("ip", text.toString())
+            }
+        }
+
+        recvPortNumInput.doAfterTextChanged { text ->
+            val portValue = text.toString().trim().toIntOrNull() ?: 5004
+            preferences.edit {
+                putInt("port", portValue)
+            }
+        }
+
+        mtuNumInput.doAfterTextChanged { text ->
+            val mtuValue = text.toString().trim().toIntOrNull() ?: 1500
+            preferences.edit {
+                putInt("mtu", mtuValue)
             }
         }
     }
@@ -77,8 +121,15 @@ class MainActivity : AppCompatActivity() {
         backgroundThread = HandlerThread("CameraBackground").apply { start() }
         backgroundHandler = Handler(backgroundThread!!.looper)
 
-        // Initialize stream controller and get the GPU surface
-        nativeSurface = initCameraStream("192.168.0.175", 5004)
+        nativeSurface = initCameraStream(
+            recvIpTextInput.text.toString(),
+            recvPortNumInput.text.toString().toInt(),
+            mtuNumInput.text.toString().toInt()
+        )
+
+        recvIpTextInput.isEnabled = false
+        recvPortNumInput.isEnabled = false
+        mtuNumInput.isEnabled = false
 
         val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameraId = cameraManager.cameraIdList[0]
@@ -87,7 +138,7 @@ class MainActivity : AppCompatActivity() {
             override fun onOpened(camera: CameraDevice) {
                 cameraDevice = camera
 
-                val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+                val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 captureBuilder.addTarget(nativeSurface!!)
 
                 // Start camera capture in a background thread
@@ -123,6 +174,10 @@ class MainActivity : AppCompatActivity() {
         backgroundHandler = null
 
         runOnUiThread { Toast.makeText(this@MainActivity, "Stopped Streaming!", Toast.LENGTH_SHORT).show() }
+
+        recvIpTextInput.isEnabled = true
+        recvPortNumInput.isEnabled = true
+        mtuNumInput.isEnabled = true
     }
 
     override fun onDestroy() {

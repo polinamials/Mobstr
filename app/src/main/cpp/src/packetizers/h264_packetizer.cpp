@@ -12,7 +12,7 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-H264Packetizer::H264Packetizer()
+H264Packetizer::H264Packetizer(size_t packetSize) : m_packetSize(packetSize)
 {
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -35,7 +35,7 @@ std::vector<RtpPacket> H264Packetizer::processFrame(const uint8_t *data, size_t 
     if (m_nalus.size() > 1)
     {
         // Do aggregation
-        std::vector<RtpPacket> aggrPackets = getAggregateRtpPackets(data, size, timestamp, DEFAULT_MTU, m_nalus);
+        std::vector<RtpPacket> aggrPackets = getAggregateRtpPackets(data, size, timestamp, m_packetSize, m_nalus);
         outputPackets.insert(outputPackets.end(), aggrPackets.begin(), aggrPackets.end());
 
         // Handle packets that shouldn't be aggregated
@@ -51,10 +51,10 @@ std::vector<RtpPacket> H264Packetizer::processFrame(const uint8_t *data, size_t 
             for (const auto& nal : remainingNalus) {
                 std::vector<NaluInfo> standaloneWrapper = { nal };
                 if (nal.split) {
-                    std::vector<RtpPacket> fuPackets = getFuRtpPackets(data, size, timestamp, DEFAULT_MTU, standaloneWrapper);
+                    std::vector<RtpPacket> fuPackets = getFuRtpPackets(data, size, timestamp, m_packetSize, standaloneWrapper);
                     outputPackets.insert(outputPackets.end(), fuPackets.begin(), fuPackets.end());
                 } else {
-                    std::vector<RtpPacket> singlePackets = getSingleNalRtpPackets(data, size, timestamp, DEFAULT_MTU, standaloneWrapper);
+                    std::vector<RtpPacket> singlePackets = getSingleNalRtpPackets(data, size, timestamp, m_packetSize, standaloneWrapper);
                     outputPackets.insert(outputPackets.end(), singlePackets.begin(), singlePackets.end());
                 }
             }
@@ -64,17 +64,15 @@ std::vector<RtpPacket> H264Packetizer::processFrame(const uint8_t *data, size_t 
     {
         // Process single NAL: either send whole or split into FUs
         if (m_nalus[0].split) {
-            outputPackets = getFuRtpPackets(data, size, timestamp, DEFAULT_MTU, m_nalus);
+            outputPackets = getFuRtpPackets(data, size, timestamp, m_packetSize, m_nalus);
         } else {
-            outputPackets = getSingleNalRtpPackets(data, size, timestamp, DEFAULT_MTU, m_nalus);
+            outputPackets = getSingleNalRtpPackets(data, size, timestamp, m_packetSize, m_nalus);
         }
     }
 
     return outputPackets;
 }
 
-#include "h264_packetizer.hpp"
-#include <algorithm>
 
 std::vector<NaluInfo> H264Packetizer::getMultipleNalus(const uint8_t* data, const size_t size, const size_t packetSize)
 {
@@ -147,10 +145,10 @@ std::vector<NaluInfo> H264Packetizer::getNalus(const uint8_t *data, size_t size,
 
     switch(flags)
     {
-        case 1: return getSingleNalu(data, size, DEFAULT_MTU, H264_NAL_TYPES::IDR); break;
-        case 0: return getSingleNalu(data, size, DEFAULT_MTU, H264_NAL_TYPES::NON_IDR); break;
-        case 4: return getSingleNalu(data, size, DEFAULT_MTU, H264_NAL_TYPES::END_OF_STREAM);
-        default: return getMultipleNalus(data, size, DEFAULT_MTU); break;
+        case 1: return getSingleNalu(data, size, m_packetSize, H264_NAL_TYPES::IDR); break;
+        case 0: return getSingleNalu(data, size, m_packetSize, H264_NAL_TYPES::NON_IDR); break;
+        case 4: return getSingleNalu(data, size, m_packetSize, H264_NAL_TYPES::END_OF_STREAM);
+        default: return getMultipleNalus(data, size, m_packetSize); break;
     }
 };
 

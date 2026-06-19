@@ -2,15 +2,16 @@
 #include "packetizers/h264_packetizer.hpp"
 #include <media/NdkMediaFormat.h>
 #include <android/log.h>
+#include <memory>
 
 #define LOG_TAG "MOBSTR_STREAM_CONTROLLER"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-StreamController::StreamController(const std::string& ip, uint16_t port)
+StreamController::StreamController(const std::string& ip, uint16_t port, size_t packetSize)
         : m_socket(ip, port) {
     // Assume H264 for now
-    m_packetizer = std::make_unique<H264Packetizer>();
+    m_packetizer = std::make_unique<H264Packetizer>(packetSize);
 }
 
 StreamController::~StreamController() {
@@ -21,14 +22,12 @@ ANativeWindow* StreamController::initializeEncoder(int32_t width, int32_t height
     m_width = width;
     m_height = height;
 
-    // Initialize H264 encoder
     m_encoder = AMediaCodec_createEncoderByType("video/avc");
     if (!m_encoder) {
         LOGE("Failed to create H.264 hardware encoder.");
         return nullptr;
     }
 
-    // Configure video format parameters
     AMediaFormat* format = AMediaFormat_new();
     AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, "video/avc");
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, m_width);
@@ -37,6 +36,7 @@ ANativeWindow* StreamController::initializeEncoder(int32_t width, int32_t height
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, 2000000);
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, 30);
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, 1);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_LATENCY, 1);
 
     media_status_t status = AMediaCodec_configure(m_encoder, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
     AMediaFormat_delete(format);

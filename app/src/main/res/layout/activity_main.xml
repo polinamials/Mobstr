@@ -6,24 +6,75 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
-    <TextView
-        android:id="@+id/sample_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Welcome to Mobstr!"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
     <Button
         android:id="@+id/startStreamBtn"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginBottom="32dp"
         android:text="Start Streaming"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/sample_text" />
+        app:layout_constraintTop_toBottomOf="@+id/mtuNumInput"
+        app:layout_constraintVertical_bias="1.0" />
+
+    <EditText
+        android:id="@+id/recvPortNumInput"
+        android:layout_width="89dp"
+        android:layout_height="0dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginEnd="32dp"
+        android:ems="10"
+        android:hint="Port"
+        android:inputType="number"
+        app:layout_constraintBottom_toBottomOf="@+id/recvIpTextInput"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toEndOf="@+id/recvIpTextInput"
+        app:layout_constraintTop_toTopOf="@+id/recvIpTextInput"
+        app:layout_constraintVertical_bias="0.0" />
+
+    <EditText
+        android:id="@+id/recvIpTextInput"
+        android:layout_width="213dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="24dp"
+        android:ems="10"
+        android:hint="IP Address"
+        android:inputType="number"
+        app:layout_constraintStart_toStartOf="@+id/textView"
+        app:layout_constraintTop_toBottomOf="@+id/textView" />
+
+    <TextView
+        android:id="@+id/textView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="32dp"
+        android:layout_marginTop="32dp"
+        android:text="Connection Settings"
+        android:textSize="20sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <TextView
+        android:id="@+id/textView3"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="32dp"
+        android:layout_marginTop="32dp"
+        android:text="Stream Settings"
+        android:textSize="20sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/recvIpTextInput" />
+
+    <EditText
+        android:id="@+id/mtuNumInput"
+        android:layout_width="101dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="24dp"
+        android:ems="10"
+        android:hint="MTU"
+        android:inputType="number"
+        app:layout_constraintStart_toStartOf="@+id/textView3"
+        app:layout_constraintTop_toBottomOf="@+id/textView3" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
