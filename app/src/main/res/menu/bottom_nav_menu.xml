@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_stream"
+        android:title="Stream Settings" />
+    <item
+        android:id="@+id/nav_camera"
+        android:title="Camera Settings" />
+    <item
+        android:id="@+id/nav_diagnostics"
+        android:title="Statistics" />
+</menu>

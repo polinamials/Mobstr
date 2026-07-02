@@ -1,6 +1,7 @@
 #include "stream_controller.hpp"
 #include "packetizers/h264_packetizer.hpp"
 #include <media/NdkMediaFormat.h>
+#include <media/NdkMediaCodecInfo.h>
 #include <android/log.h>
 #include <memory>
 
@@ -37,6 +38,10 @@ ANativeWindow* StreamController::initializeEncoder(int32_t width, int32_t height
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, 30);
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, 1);
     AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_LATENCY, 1);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_PROFILE,1);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_LEVEL, 256);
+    AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BITRATE_MODE, 2);
+
 
     media_status_t status = AMediaCodec_configure(m_encoder, format, nullptr, nullptr, AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
     AMediaFormat_delete(format);

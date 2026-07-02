@@ -4,19 +4,28 @@ import android.Manifest
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
 import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
-import android.util.Log
+import android.util.Size
 import android.view.Surface
 import android.widget.Button
-import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.widget.doAfterTextChanged
-import androidx.core.content.edit
+import androidx.camera.viewfinder.CameraViewfinder
+import androidx.camera.viewfinder.ViewfinderSurfaceRequest
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.Fragment
+import androidx.viewpager2.adapter.FragmentStateAdapter
+import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.tabs.TabLayout
+import com.google.android.material.tabs.TabLayoutMediator
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,13 +33,21 @@ class MainActivity : AppCompatActivity() {
     private var backgroundThread: HandlerThread? = null
     private var backgroundHandler: Handler? = null
     private var nativeSurface: Surface? = null
+    private var localPreviewSurface: Surface? = null
+
     private lateinit var startStreamBtn: Button
-    private lateinit var recvIpTextInput: EditText
-    private lateinit var recvPortNumInput: EditText
-    private lateinit var mtuNumInput: EditText
+    private lateinit var viewPager: ViewPager2
+    private lateinit var tabLayout: TabLayout
+    private lateinit var cameraSurfacePreview: CameraViewfinder
     private lateinit var preferences: SharedPreferences
 
-    external fun initCameraStream(ip: String, port: Int, mtu: Int): Surface
+    private var isStreaming = false
+    private var wasStreamingBeforeRotation = false
+
+    private var cameraCaptureSession: CameraCaptureSession? = null
+    private var cameraCaptureBuilder: CaptureRequest.Builder? = null
+
+    external fun initCameraStream(ip: String, port: Int, mtu: Int, width: Int, height: Int): Surface
     private external fun startCameraStream()
     private external fun stopCameraStream()
 
@@ -44,92 +61,144 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        startStreamBtn = findViewById<Button>(R.id.startStreamBtn)
-        recvIpTextInput = findViewById<EditText>(R.id.recvIpTextInput)
-        recvPortNumInput = findViewById<EditText>(R.id.recvPortNumInput)
-        mtuNumInput = findViewById<EditText>(R.id.mtuNumInput)
-
         preferences = getSharedPreferences("MobstrPrefs", 0)
+        startStreamBtn = findViewById(R.id.startStreamBtn)
+        viewPager = findViewById(R.id.viewPager)
+        tabLayout = findViewById(R.id.tabLayout)
+        cameraSurfacePreview = findViewById(R.id.cameraSurfacePreview)
 
-        val savedIp = preferences.getString("ip", "")
-        val savedPort = preferences.getInt("port", 5004)
-        val savedMtu = preferences.getInt("mtu", 1500)
+        if (savedInstanceState != null) {
+            wasStreamingBeforeRotation = savedInstanceState.getBoolean("is_streaming_key", false)
+        }
 
-        recvIpTextInput.setText(savedIp)
-        recvPortNumInput.setText(savedPort.toString())
-        mtuNumInput.setText(savedMtu.toString())
+        setupViewfinder()
+
+        viewPager.adapter = ViewPagerAdapter(this)
+
+        setupTabsWithMediator()
 
         startStreamBtn.setOnClickListener {
             if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(arrayOf(Manifest.permission.CAMERA), 101)
             } else {
-                if (startStreamBtn.text == "Start Streaming") {
-                    startCameraPipeline()
-                    startStreamBtn.text = "Stop Streaming"
-                } else {
-                    stopCameraPipeline()
-                    startStreamBtn.text = "Start Streaming"
-                }
-            }
-        }
-
-        recvIpTextInput.doAfterTextChanged { text ->
-            preferences.edit {
-                putString("ip", text.toString())
-            }
-        }
-
-        recvPortNumInput.doAfterTextChanged { text ->
-            val portValue = text.toString().trim().toIntOrNull() ?: 5004
-            preferences.edit {
-                putInt("port", portValue)
-            }
-        }
-
-        mtuNumInput.doAfterTextChanged { text ->
-            val mtuValue = text.toString().trim().toIntOrNull() ?: 1500
-            preferences.edit {
-                putInt("mtu", mtuValue)
+                toggleStreamingPipeline()
             }
         }
     }
 
-    @androidx.annotation.RequiresPermission(Manifest.permission.CAMERA)
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        val startStreamBtn = findViewById<Button>(R.id.startStreamBtn)
-        if (requestCode == 101 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            if (startStreamBtn.text == "Start Streaming") {
-                startCameraPipeline()
-                startStreamBtn.text = "Stop Streaming"
-            } else {
-                stopCameraPipeline()
-                startStreamBtn.text = "Start Streaming"
+    private fun setupTabsWithMediator() {
+        tabLayout.post {
+            if (!isDestroyed && !isFinishing) {
+                val mediator = TabLayoutMediator(tabLayout, viewPager) { tab, position ->
+                    tab.text = when (position) {
+                        0 -> "Settings"
+                        1 -> "Controls"
+                        2 -> "Diagnostics"
+                        else -> null
+                    }
+                }
+                mediator.attach()
             }
+        }
+    }
+
+    private fun setupViewfinder() {
+        cameraSurfacePreview.post {
+            val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            try {
+                val cameraId = cameraManager.cameraIdList[0]
+                val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+
+                val streamWidth = preferences.getInt("stream_width", 1280)
+                val streamHeight = preferences.getInt("stream_height", 720)
+                val previewResolution = Size(streamWidth, streamHeight)
+
+                val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+
+                val request = ViewfinderSurfaceRequest.Builder(previewResolution)
+                    .setLensFacing(CameraMetadata.LENS_FACING_BACK)
+                    .setSensorOrientation(sensorOrientation)
+                    .setImplementationMode(CameraViewfinder.ImplementationMode.COMPATIBLE)
+                    .build()
+
+                val future = cameraSurfacePreview.requestSurfaceAsync(request)
+                future.addListener({
+                    try {
+                        localPreviewSurface = future.get()
+
+                        if (wasStreamingBeforeRotation && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                            wasStreamingBeforeRotation = false
+                            toggleStreamingPipeline()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }, ContextCompat.getMainExecutor(this))
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean("is_streaming_key", isStreaming)
+    }
+
+    @androidx.annotation.RequiresPermission(Manifest.permission.CAMERA)
+    private fun toggleStreamingPipeline() {
+        if (!isStreaming) {
+            val ip = preferences.getString("ip", "") ?: ""
+            val port = preferences.getInt("port", 5004)
+            val mtu = preferences.getInt("mtu", 1500)
+            val streamWidth = preferences.getInt("stream_width", 1280)
+            val streamHeight = preferences.getInt("stream_height", 720)
+
+            if (ip.isEmpty()) {
+                Toast.makeText(this, "Please configure a valid IP address first.", Toast.LENGTH_SHORT).show()
+                return
+            }
+            if (localPreviewSurface == null) {
+                Toast.makeText(this, "Preview surface is not ready yet.", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            startCameraPipeline(ip, port, mtu, streamWidth, streamHeight)
+            isStreaming = true
+            startStreamBtn.text = "Stop Streaming"
+            toggleInputFields(false)
+        } else {
+            stopCameraPipeline()
+            isStreaming = false
+            startStreamBtn.text = "Start Streaming"
+            toggleInputFields(true)
+        }
+    }
+
+    private fun toggleInputFields(enabled: Boolean) {
+        val currentFragment = supportFragmentManager.findFragmentByTag("f0")
+        if (currentFragment is StreamSettingsFragment) {
+            currentFragment.setInputFieldsEnabled(enabled)
+        }
+    }
+
+    @androidx.annotation.RequiresPermission(Manifest.permission.CAMERA)
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 101 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            toggleStreamingPipeline()
         } else {
             Toast.makeText(this, "Camera permission is required.", Toast.LENGTH_LONG).show()
-            finish()
         }
     }
 
     @androidx.annotation.RequiresPermission(Manifest.permission.CAMERA)
-    private fun startCameraPipeline() {
+    private fun startCameraPipeline(ip: String, port: Int, mtu: Int, width: Int, height: Int) {
         backgroundThread = HandlerThread("CameraBackground").apply { start() }
         backgroundHandler = Handler(backgroundThread!!.looper)
 
-        nativeSurface = initCameraStream(
-            recvIpTextInput.text.toString(),
-            recvPortNumInput.text.toString().toInt(),
-            mtuNumInput.text.toString().toInt()
-        )
-
-        recvIpTextInput.isEnabled = false
-        recvPortNumInput.isEnabled = false
-        mtuNumInput.isEnabled = false
+        nativeSurface = initCameraStream(ip, port, mtu, width, height)
 
         val cameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         val cameraId = cameraManager.cameraIdList[0]
@@ -137,24 +206,25 @@ class MainActivity : AppCompatActivity() {
         cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(camera: CameraDevice) {
                 cameraDevice = camera
+                val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
 
-                val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
                 captureBuilder.addTarget(nativeSurface!!)
+                captureBuilder.addTarget(localPreviewSurface!!)
 
-                // Start camera capture in a background thread
-                camera.createCaptureSession(listOf(nativeSurface!!), object : android.hardware.camera2.CameraCaptureSession.StateCallback() {
-                    override fun onConfigured(session: android.hardware.camera2.CameraCaptureSession) {
+                val outputSurfaces = listOf(nativeSurface!!, localPreviewSurface!!)
+                camera.createCaptureSession(outputSurfaces, object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        cameraCaptureSession = session
+                        cameraCaptureBuilder = captureBuilder
+
                         session.setRepeatingRequest(captureBuilder.build(), null, backgroundHandler)
-
-                        // Start the stream controller's polling loop
                         startCameraStream()
-
-                        runOnUiThread { Toast.makeText(this@MainActivity, "Started Streaming!", Toast.LENGTH_SHORT).show() }
                     }
-                    override fun onConfigureFailed(session: android.hardware.camera2.CameraCaptureSession) {}
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        runOnUiThread { Toast.makeText(this@MainActivity, "Failed to configure session.", Toast.LENGTH_SHORT).show() }
+                    }
                 }, backgroundHandler)
             }
-
             override fun onDisconnected(camera: CameraDevice) { camera.close() }
             override fun onError(camera: CameraDevice, error: Int) { camera.close() }
         }, backgroundHandler)
@@ -162,26 +232,43 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopCameraPipeline() {
         stopCameraStream()
-
+        cameraCaptureSession?.close()
+        cameraCaptureSession = null
+        cameraCaptureBuilder = null
         cameraDevice?.close()
         cameraDevice = null
-
         nativeSurface?.release()
         nativeSurface = null
-
         backgroundThread?.quitSafely()
         backgroundThread = null
         backgroundHandler = null
-
-        runOnUiThread { Toast.makeText(this@MainActivity, "Stopped Streaming!", Toast.LENGTH_SHORT).show() }
-
-        recvIpTextInput.isEnabled = true
-        recvPortNumInput.isEnabled = true
-        mtuNumInput.isEnabled = true
     }
 
     override fun onDestroy() {
         super.onDestroy()
         stopCameraPipeline()
+    }
+
+    fun <T> updateCameraParameter(key: CaptureRequest.Key<T>, value: T) {
+        cameraCaptureBuilder?.set(key, value)
+        try {
+            cameraCaptureBuilder?.let { builder ->
+                cameraCaptureSession?.setRepeatingRequest(builder.build(), null, backgroundHandler)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private inner class ViewPagerAdapter(activity: AppCompatActivity) : FragmentStateAdapter(activity) {
+        override fun getItemCount(): Int = 3
+        override fun createFragment(position: Int): Fragment {
+            return when (position) {
+                0 -> StreamSettingsFragment()
+                1 -> CameraControlsFragment()
+                2 -> DiagnosticsFragment()
+                else -> throw IllegalArgumentException("Invalid layout space placement")
+            }
+        }
     }
 }
