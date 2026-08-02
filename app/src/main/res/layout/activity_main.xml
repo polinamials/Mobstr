@@ -9,7 +9,7 @@
         android:id="@+id/cameraSurfacePreview"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        app:scaleType="fillCenter"
+        app:scaleType="fitCenter"
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintBottom_toTopOf="@id/startStreamBtn"
         app:layout_constraintStart_toStartOf="parent"

@@ -5,124 +5,98 @@ import android.content.SharedPreferences
 import android.graphics.ImageFormat
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
-import android.hardware.camera2.params.StreamConfigurationMap
 import android.os.Bundle
 import android.util.Size
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.EditText
-import android.widget.Spinner
+import android.widget.*
 import androidx.core.content.edit
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.Fragment
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 class StreamSettingsFragment : Fragment() {
-
-    private lateinit var recvIpTextInput: EditText
-    private lateinit var recvPortNumInput: EditText
-    private lateinit var mtuNumInput: EditText
-    private lateinit var resolutionSpinner: Spinner
+    private lateinit var rtspUrl: TextView
+    private lateinit var rtspPort: EditText
+    private lateinit var mtu: EditText
+    private lateinit var bitrate: EditText
+    private lateinit var resolution: Spinner
     private lateinit var preferences: SharedPreferences
+    private var sizes = emptyList<Size>()
 
-    private var supportedResolutions: List<Size> = emptyList()
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, state: Bundle?) =
+        inflater.inflate(R.layout.fragment_stream_settings, container, false)
 
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View? {
-        return inflater.inflate(R.layout.fragment_stream_settings, container, false)
-    }
-
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
-
-        recvIpTextInput = view.findViewById(R.id.recvIpTextInput)
-        recvPortNumInput = view.findViewById(R.id.recvPortNumInput)
-        mtuNumInput = view.findViewById(R.id.mtuNumInput)
-        resolutionSpinner = view.findViewById(R.id.resolutionSpinner)
-
+    override fun onViewCreated(view: View, state: Bundle?) {
         preferences = requireActivity().getSharedPreferences("MobstrPrefs", 0)
-
-        recvIpTextInput.setText(preferences.getString("ip", ""))
-        recvPortNumInput.setText(preferences.getInt("port", 5004).toString())
-        mtuNumInput.setText(preferences.getInt("mtu", 1500).toString())
-
-        recvIpTextInput.doAfterTextChanged { text ->
-            preferences.edit { putString("ip", text.toString().trim()) }
+        rtspUrl = view.findViewById(R.id.rtspUrlText)
+        rtspPort = view.findViewById(R.id.rtspPortInput)
+        mtu = view.findViewById(R.id.mtuNumInput)
+        bitrate = view.findViewById(R.id.bitrateInput)
+        resolution = view.findViewById(R.id.resolutionSpinner)
+        migrateLegacyBitrateDefault()
+        rtspPort.setText(preferences.getInt("rtsp_port", 8554).toString())
+        mtu.setText(preferences.getInt("mtu", 1200).toString())
+        bitrate.setText(preferences.getInt("bitrate_kbps", 8_000).toString())
+        updateUrl()
+        rtspPort.doAfterTextChanged {
+            val value = it.toString().toIntOrNull()?.takeIf { value -> value in 1024..65535 } ?: return@doAfterTextChanged
+            preferences.edit { putInt("rtsp_port", value) }
+            updateUrl()
         }
-        recvPortNumInput.doAfterTextChanged { text ->
-            val portValue = text.toString().trim().toIntOrNull() ?: 5004
-            preferences.edit { putInt("port", portValue) }
+        mtu.doAfterTextChanged {
+            val value = it.toString().toIntOrNull()?.takeIf { value -> value in 256..1472 } ?: return@doAfterTextChanged
+            preferences.edit { putInt("mtu", value) }
         }
-        mtuNumInput.doAfterTextChanged { text ->
-            val mtuValue = text.toString().trim().toIntOrNull() ?: 1500
-            preferences.edit { putInt("mtu", mtuValue) }
+        bitrate.doAfterTextChanged {
+            val value = it.toString().toIntOrNull()?.takeIf { value -> value in 128..100_000 } ?: return@doAfterTextChanged
+            preferences.edit { putInt("bitrate_kbps", value) }
         }
-
-        setupResolutionDropdown()
+        setupResolutions()
     }
 
-    private fun setupResolutionDropdown() {
-        try {
-            val cameraManager = requireContext().getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId = cameraManager.cameraIdList[0]
-            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+    private fun migrateLegacyBitrateDefault() {
+        if (preferences.getBoolean("bitrate_default_v2_migrated", false)) return
+        val usedLegacyDefault = preferences.getInt("bitrate_kbps", 2_000) == 2_000
+        preferences.edit {
+            if (usedLegacyDefault) putInt("bitrate_kbps", 8_000)
+            putBoolean("bitrate_default_v2_migrated", true)
+        }
+    }
 
-            val map: StreamConfigurationMap? = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+    private fun updateUrl() {
+        val port = rtspPort.text.toString().toIntOrNull() ?: 8554
+        rtspUrl.text = "rtsp://${localIpv4()}:$port/live"
+    }
 
-            if (map != null) {
-                val sizes = map.getOutputSizes(ImageFormat.PRIVATE)
+    private fun localIpv4(): String = runCatching {
+        NetworkInterface.getNetworkInterfaces().toList().flatMap { it.inetAddresses.toList() }
+            .firstOrNull { it is Inet4Address && !it.isLoopbackAddress && !it.isLinkLocalAddress }?.hostAddress
+    }.getOrNull() ?: "phone-ip"
 
-                if (sizes != null) {
-                    supportedResolutions = sizes.sortedWith(Comparator { s1, s2 ->
-                        (s2.width * s2.height).compareTo(s1.width * s1.height)
-                    })
-
-                    val resolutionStrings = supportedResolutions.map { "${it.width}x${it.height}" }
-
-                    val adapter = ArrayAdapter(
-                        requireContext(),
-                        android.R.layout.simple_spinner_item,
-                        resolutionStrings
-                    )
-                    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                    resolutionSpinner.adapter = adapter
-
-                    val savedWidth = preferences.getInt("stream_width", 1280)
-                    val savedHeight = preferences.getInt("stream_height", 720)
-                    val matchingIndex = supportedResolutions.indexOfFirst { it.width == savedWidth && it.height == savedHeight }
-
-                    if (matchingIndex != -1) {
-                        resolutionSpinner.setSelection(matchingIndex)
-                    }
-
-                    resolutionSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                            val selectedSize = supportedResolutions[position]
-                            preferences.edit {
-                                putInt("stream_width", selectedSize.width)
-                                putInt("stream_height", selectedSize.height)
-                            }
-                        }
-                        override fun onNothingSelected(parent: AdapterView<*>?) {}
-                    }
-                }
+    private fun setupResolutions() {
+        val manager = requireContext().getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val cameraId = manager.cameraIdList.firstOrNull {
+            manager.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+        } ?: manager.cameraIdList.first()
+        val map = manager.getCameraCharacteristics(cameraId).get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
+        sizes = map.getOutputSizes(ImageFormat.PRIVATE)?.distinct()?.sortedByDescending { it.width.toLong() * it.height } ?: return
+        resolution.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_item,
+            sizes.map { "${it.width}×${it.height}" }).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        val width = preferences.getInt("stream_width", 1280)
+        val height = preferences.getInt("stream_height", 720)
+        resolution.setSelection(sizes.indexOfFirst { it.width == width && it.height == height }.coerceAtLeast(0), false)
+        resolution.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                preferences.edit { putInt("stream_width", sizes[position].width); putInt("stream_height", sizes[position].height) }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
     }
 
     fun setInputFieldsEnabled(enabled: Boolean) {
-        if (::recvIpTextInput.isInitialized) {
-            recvIpTextInput.isEnabled = enabled
-            recvPortNumInput.isEnabled = enabled
-            mtuNumInput.isEnabled = enabled
-            resolutionSpinner.isEnabled = enabled
-        }
+        if (::rtspPort.isInitialized) listOf(rtspPort, mtu, bitrate, resolution).forEach { it.isEnabled = enabled }
     }
 }

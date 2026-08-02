@@ -1,35 +1,35 @@
-// stream_controller.hpp
 #pragma once
+
+#include <android/native_window.h>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <media/NdkMediaCodec.h>
 #include <memory>
 #include <string>
-#include <atomic>
 #include <thread>
-#include <mutex>
-#include <queue>
-#include <condition_variable>
-#include <media/NdkMediaCodec.h>
-#include "socket.hpp"
-#include "packetizers/rtp_packetizer.hpp"
+
+class Live555Server;
 
 class StreamController {
 public:
-    StreamController(const std::string& ip, uint16_t port, size_t packetSize);
+    StreamController(uint16_t rtspPort, size_t packetSize, int32_t bitrate);
     ~StreamController();
 
     ANativeWindow* initializeEncoder(int32_t width, int32_t height);
-
     void startStreaming();
     void stopStreaming();
+    std::string diagnostics() const;
 
 private:
-    void packetHandlingLoop();
+    void codecLoop();
+    void requestKeyFrame();
 
-    Socket m_socket;
-    std::unique_ptr<RtpPacketizer> m_packetizer;
+    const uint16_t m_rtspPort;
+    const size_t m_packetSize;
+    const int32_t m_bitrate;
+    std::unique_ptr<Live555Server> m_server;
     AMediaCodec* m_encoder{nullptr};
-
-    std::thread m_workerThread;
-    std::atomic<bool> m_isStreaming{false};
-    int32_t m_width{640};
-    int32_t m_height{480};
+    std::thread m_codecThread;
+    std::atomic<bool> m_streaming{false};
 };
